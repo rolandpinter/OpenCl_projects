@@ -1,4 +1,4 @@
-#include <OpenCL/opencl.hpp> // My written adjacent_difference kernel 
+#include <OpenCL/opencl.hpp> // OpenCl Header 
 #include <vector>            // std::vector
 #include <exception>         // std::runtime_error, std::exception
 #include <iostream>          // std::cout
