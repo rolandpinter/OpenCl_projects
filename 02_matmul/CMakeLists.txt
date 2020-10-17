@@ -2,7 +2,7 @@ cmake_minimum_required(
   VERSION 3.7
 )
 
-project(OpenCL-Cpp-adjacent_difference
+project(OpenCL-Cpp-matmul
   LANGUAGES CXX
 )
 
@@ -13,7 +13,7 @@ set(CMAKE_MODULE_PATH
 find_package(OpenCL REQUIRED)
 find_package(Threads REQUIRED)
 
-set(Sources adjacent_difference.cpp)
+set(Sources matmul.cpp)
 
 add_executable(${PROJECT_NAME}
   ${Sources}
