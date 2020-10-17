@@ -1,14 +1,13 @@
-// OpenCL includes
+// OpenCL include
 #include <OpenCL/opencl.hpp> 
 
 // Standard C++ includes
 #include <sstream>
 #include <fstream>
-#include <algorithm>
-#include <memory>
 #include <iostream>
-#include <numeric>
+#include <memory>
 #include <vector>
+#include <algorithm>
 #include <random>
 #include <chrono>
 
@@ -44,7 +43,7 @@ int main()
 
 /*TODO: matmul1 from here on is missing*/
 
-        //  Create KernelFunctors for the kernels 
+        // Create KernelFunctors for the kernels 
         auto matmul0 = cl::KernelFunctor<cl::Buffer, cl::Buffer, cl::Buffer, int>(program_matmul0, "matmul0");
 
         // Initialize computation
@@ -52,43 +51,40 @@ int main()
         std::vector<float> A(size*size), B(size*size);
         std::vector<float> matmul0_result_GPU(size*size), matmul0_result_CPU(size*size);
 
-        // Fill A and B matrix with random values between -1 and 1 and result matrices with zeros
+        // Create random number generator: uniform distribution between -1 and 1
         std::random_device rnd_device;
 	    std::mt19937 mersenne_engine(rnd_device());
 	    std::uniform_real_distribution<double> dist(-1.0, 1.0);
 	    auto gen = [&]() { return dist(mersenne_engine); };
 
+        // Fill A and B matrix with random values between -1 and 1 and result matrices with zeros
         std::generate(A.begin(), A.end(), gen);
 	    std::generate(B.begin(), B.end(), gen);
         std::fill(matmul0_result_GPU.begin(), matmul0_result_GPU.end(), 0.0f);
         std::fill(matmul0_result_CPU.begin(), matmul0_result_CPU.end(), 0.0f);
 
-        // Create buffers: we only want to read the A and B matrices, and we want to write the C matrix
+        // Create buffers: we only want to read the A and B matrices, and we want to write the result matrices
         cl::Buffer buf_A{ std::begin(A), std::end(A), true };
         cl::Buffer buf_B{ std::begin(B), std::end(B), true };    
         cl::Buffer buf_matmul0_result{ std::begin(matmul0_result_GPU), std::end(matmul0_result_GPU), false }; 
 
-        // Dispatch of data before launch, a.k.a. copy the A, B, C into the cl::Buffers buf_A, buf_B, buf_C
+        // Dispatch of data before launch, a.k.a. copy the matrices into the cl::Buffers
         cl::copy(queue, std::begin(A), std::end(A), buf_A);
         cl::copy(queue, std::begin(B), std::end(B), buf_B);
         cl::copy(queue, std::begin(matmul0_result_GPU), std::end(matmul0_result_GPU), buf_matmul0_result);
 
         // Launch matmul0  kernel and measure the computation time
-        auto tStart_matmul0_GPU = std::chrono::high_resolution_clock::now(); // Record start time
+        auto tStart_matmul0_GPU = std::chrono::high_resolution_clock::now(); 
 
         matmul0(cl::EnqueueArgs{ queue, cl::NDRange{ size*size } }, buf_A, buf_B, buf_matmul0_result, size);
+        cl::finish(); // Wait for the started kernel to finish
 
-        // Wait for the started kernel to finish
-        cl::finish();
-
-        auto tEnd_matmul0_GPU = std::chrono::high_resolution_clock::now(); // Record end time
-
-        //Elapsed time while computing on GPU
+        auto tEnd_matmul0_GPU = std::chrono::high_resolution_clock::now();
         auto dt_matmul0_GPU = std::chrono::duration_cast<std::chrono::microseconds>(tEnd_matmul0_GPU - tStart_matmul0_GPU).count();
         std::cout << "matmul0 GPU computation time : " << dt_matmul0_GPU << " ms." << std::endl;
+        
         // Fetch of results, a.k.a. copy the results from buf_matmul0_result to matmul0_result_GPU
         cl::copy(queue, buf_matmul0_result,  std::begin(matmul0_result_GPU), std::end(matmul0_result_GPU));
-
 
         // Calculate matmul0 style with CPU as well
         auto tStart_matmul0_CPU = std::chrono::high_resolution_clock::now(); // Record start time
