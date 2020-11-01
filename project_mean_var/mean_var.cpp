@@ -26,7 +26,7 @@ int main()
         program.build({ device });
 
         // Create a dummy testing vector
-        size_t N = 2048;
+        size_t N = 900;
         std::vector<float> data(N);
         for (int i = 0; i < N; ++i)
             data[i] = 1.0;
@@ -36,13 +36,23 @@ int main()
 
         // Access work group size 
         auto workGroupSize = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
-        auto numWorkGroups = data.size() / workGroupSize;
+        
+        // Check if N % workGroupSize is 0, if not, append 0s to data
+        if (N % workGroupSize != 0)
+        {
+            data.resize(N + (workGroupSize - (N % workGroupSize)), 0.0);
+            std::cout << "Resize was needed, from N = " << N << " to N = " << data.size() << " (appended elements are zeros)!" <<std::endl;
+            N = data.size();
+        }
 
+        // Number of work groups
+        auto numWorkGroups = N / workGroupSize;
+        
         // Result vector holding the partial sums
         std::vector<float> result(numWorkGroups);
 
         // Create buffers
-        cl::Buffer buf_in(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, sizeof(float) * data.size(), data.data());
+        cl::Buffer buf_in(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, sizeof(float) * N, data.data());
         cl::Buffer buf_out(context, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, sizeof(float) * numWorkGroups);
 
         // reduction kernel takes 3 arguments
