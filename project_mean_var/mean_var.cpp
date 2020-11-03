@@ -21,7 +21,7 @@ int main()
         program.build({ device });
 
         // Create a dummy testing vector
-        size_t N_original = 2500; // N should be between 2 - 2^24 = 16777216 for the project
+        size_t N_original = 16777216; // N should be between 2 - 2^24 = 16777216 for the project
         size_t N = N_original;    // will be overwritten at each kernel launches
         std::vector<float> data(N);
         for (int i = 0; i < N; ++i)
@@ -123,8 +123,15 @@ int main()
         }
 
         // Check if final result vector indeed stores 1 final value
-        std::cout << "number of elements in last result vector = " << results[n_launch - 1].size() << std::endl;
-        std::cout << "Final result is: " << results[n_launch - 1][0] << std::endl;
+        std::cout << "number of elements in last result vector  = " << results[n_launch - 1].size() << std::endl;
+        std::cout << "Final sum is: " << results[n_launch - 1][0] << std::endl;
+
+        // Dividing the sum of the input data with the original data size <- determining the mean of the dataset
+        float mean_of_data = results[n_launch - 1][0] / N_original;
+
+        std::cout << "\n###############################" << std::endl;
+        std::cout << "Mean of the input data = " << mean_of_data << std::endl;
+        std::cout << "###############################" << std::endl;
 
        
     }/// end of try case
