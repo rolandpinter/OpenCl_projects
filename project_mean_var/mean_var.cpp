@@ -34,8 +34,8 @@ int main()
         program_var_reduction.build({ device});
 
         // Create input data vector and fill with random numbers
-        size_t N_original = 16777216;                       // N should be between 2 - 2^24 (=16777216) for the project
-        size_t N = N_original;                        // Will be overwritten at each kernel launches
+        size_t N_original = 16777216;                  // N should be between 2 - 2^24 (=16777216) for the project
+        size_t N = N_original;                         // Will be overwritten at each kernel launches
         
         std::vector<float> data_original(N_original); // Original input data (needed in original shape for CPU calculations)
         std::vector<float> data(N);                   // Will be resized, appended with 0s if size != workgroupsize * even number
@@ -55,26 +55,26 @@ int main()
 
         // Access work group size 
         int workGroupSize = kernel_reduction.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
-        std::cout<<"LOG: work group size = " << workGroupSize<<std::endl;
         
         // Check if N % workGroupSize is 0, if not, append 0s to data
         if (N % workGroupSize != 0)
         {
             data.resize(N + (workGroupSize - (N % workGroupSize)), 0.0);
-            std::cout << "LOG: starting data, resize was needed, from N = " << N << " to N = " << data.size() << " (appended elements are zeros)!" <<std::endl;
+            std::cout << "\nLOG: starting data, resize was needed, from N = " << N << " to N = " << data.size() << " (appended elements are zeros)!" <<std::endl;
             N = data.size();
         }
-        size_t a = N;
+        
+        size_t N_extended = data.size(); // Stores the extended size of the input data
         
         // Determine how many kernel launches will be needed (based on N)
         int n_launch = 1;
         bool enough_launches = false;
-        int N_extended = data.size();
+        int N_temp = data.size();
         while(not enough_launches)
         {
-            if(N_extended / workGroupSize != 0)
+            if(N_temp / workGroupSize != 0)
             {
-                N_extended /= workGroupSize;
+                N_temp /= workGroupSize;
                 n_launch += 1;
             }
             else
@@ -183,7 +183,8 @@ int main()
         float mean_GPU = results_mean[n_launch - 1][0];
 
 ///Compute var using GPU
-        N = a; // TODO!!!
+        N = N_extended; // N was modified from kernel launch to kernel launch while calculating mean, so let's reset it
+
         for(int ilaunch = 0; ilaunch < n_launch; ++ilaunch)
         {
             int numWorkGroups;
@@ -210,7 +211,6 @@ int main()
                 // Start kernel and read the buf_out
                 queue.enqueueNDRangeKernel(kernel_var_reduction, cl::NullRange, cl::NDRange(N), cl::NDRange(workGroupSize));
                 queue.enqueueReadBuffer(buf_out, true, 0, sizeof(float) * numWorkGroups, results_var[ilaunch].data());
-                for(int i=0;i<results_var[0].size();++i) std::cout<<results_var[ilaunch][i]<<std::endl;
             }
 
             // If more kernel launches are needed but not the last kernel launch: simply reduction problem
@@ -285,7 +285,7 @@ int main()
         std::cout << "var_GPU = " << var_GPU << std::endl;
         std::cout << "###############################\n" << std::endl;
 
-/// Perform mean and var CPU reference calculations
+///Perform mean and var CPU reference calculations
         float sum_CPU = std::accumulate(data_original.begin(), data_original.end(), 0.0);
         float mean_CPU = sum_CPU / N_original;
 
@@ -298,7 +298,24 @@ int main()
         std::cout << "###############################" << std::endl;
         std::cout << "mean_CPU = " << mean_CPU << std::endl;
         std::cout << "var_CPU = " << var_CPU << std::endl;
-        std::cout << "###############################" << std::endl;
+        std::cout << "###############################\n" << std::endl;
+
+///Check if mean and var computed by GPU and CPU are the same within small tolerance
+    float tolearance = 1e-4;
+    float relative_error_mean = std::abs((mean_CPU - mean_GPU) / mean_CPU);
+    float relative_error_var = std::abs((var_CPU - var_GPU) / var_CPU);
+
+    std::cout << "###############################" << std::endl;
+    std::cout << "Relative error for mean is: " << relative_error_mean << std::endl;
+    std::cout << "Relative error for var is: " << relative_error_var << std::endl;
+
+    if( relative_error_mean < tolearance ) std::cout << "Mean calculation OK!" << std::endl;
+    else std::cout << "Mean calculation WRONG!" << std::endl;
+
+    if( relative_error_var < tolearance ) std::cout << "Var calculation OK!" << std::endl;
+    else std::cout << "Var calculation WRONG!" << std::endl;
+    std::cout << "###############################\n" << std::endl;
+
 
 
     }/// end of try case
