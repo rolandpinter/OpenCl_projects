@@ -1,4 +1,4 @@
-__kernel void mean(__global float* data, __local float* localData, __global float* result, int N_original_dataset) 
+__kernel void mean(__global float* data, __local float* localData, __global float* result, int N) 
 {
     int gid = get_global_id(0);        // id of the work item amongs every work items 
     int lid = get_local_id(0);         // id of the work item in the workgroup
@@ -26,6 +26,6 @@ __kernel void mean(__global float* data, __local float* localData, __global floa
      if(lid == 0)
      {
          // id of the workgroup = get_group_id()
-        result[get_group_id(0)] =  localData[0] / N_original_dataset;
+        result[get_group_id(0)] =  localData[0] / N;
      }
 }
