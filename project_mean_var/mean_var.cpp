@@ -11,58 +11,51 @@ int main()
         cl::Platform platform{device.getInfo<CL_DEVICE_PLATFORM>()};
 
         // Load kernel source files
-        std::ifstream source_file{ "../reduction.cl" };
-        std::ifstream source_file_mean{ "../mean.cl" };
-        std::ifstream source_file_var_reduction{ "../var_reduction.cl" };
-        std::ifstream source_file_var{ "../var.cl" };
+        std::ifstream source_file{ "../reduction.cl" }; // kernel performing reduction
+        std::ifstream source_file_mean{ "../mean.cl" }; // kernel performing reduction then dividing with given N
+        std::ifstream source_file_var_reduction{ "../var_reduction.cl" }; // kernel performing reduction of (x_i - mean)**2
         if (!source_file.is_open())
             throw std::runtime_error{ std::string{ "Cannot open kernel source: " } + "reduction.cl" };
         if (!source_file_mean.is_open())
             throw std::runtime_error{ std::string{ "Cannot open kernel source: " } + "mean.cl" };
         if (!source_file_var_reduction.is_open())
             throw std::runtime_error{ std::string{ "Cannot open kernel source: " } + "var_reduction.cl" };
-        if (!source_file_var.is_open())
-            throw std::runtime_error{ std::string{ "Cannot open kernel source: " } + "var.cl" };
     
         // Create cl::Program from kernels and build them for the device
-        cl::Program program{ std::string{ std::istreambuf_iterator<char>{ source_file },
+        cl::Program program_reduction{ std::string{ std::istreambuf_iterator<char>{ source_file },
                                         std::istreambuf_iterator<char>{} } };
         cl::Program program_mean{ std::string{ std::istreambuf_iterator<char>{ source_file_mean },
                                         std::istreambuf_iterator<char>{} } };
         cl::Program program_var_reduction{ std::string{ std::istreambuf_iterator<char>{ source_file_var_reduction },
                                         std::istreambuf_iterator<char>{} } };
-        cl::Program program_var{ std::string{ std::istreambuf_iterator<char>{ source_file_var },
-                                        std::istreambuf_iterator<char>{} } };
-        program.build({ device });
+        program_reduction.build({ device });
         program_mean.build({ device });
         program_var_reduction.build({ device});
-        program_var.build({ device});
 
         // Create a dummy testing vector
-        size_t N_original = 1024; // N should be between 2 - 2^24 = 16777216 for the project
+        size_t N_original = 1024; // N should be between 2 - 2^24 (=16777216) for the project
         size_t N = N_original;    // will be overwritten at each kernel launches
         std::vector<float> data(N);
         for (int i = 0; i < N; ++i)
             data[i] = 1.0;
         
          // Create kernels from programs
-        cl::Kernel kernel(program, "reduction");
+        cl::Kernel kernel_reduction(program_reduction, "reduction");
         cl::Kernel kernel_mean(program_mean, "mean");
         cl::Kernel kernel_var_reduction(program_var_reduction, "var_reduction");
-        cl::Kernel kernel_var(program_var, "var");
 
         // Access work group size 
-        auto workGroupSize = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
+        auto workGroupSize = kernel_reduction.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
         
         // Check if N % workGroupSize is 0, if not, append 0s to data
         if (N % workGroupSize != 0)
         {
             data.resize(N + (workGroupSize - (N % workGroupSize)), 0.0);
-            std::cout << "starting data: resize was needed, from N = " << N << " to N = " << data.size() << " (appended elements are zeros)!" <<std::endl;
+            std::cout << "LOG: starting data, resize was needed, from N = " << N << " to N = " << data.size() << " (appended elements are zeros)!" <<std::endl;
             N = data.size();
         }
         
-        // Determine how many kernel launches will be needed (can be 1 ,2 ,3 based on N)
+        // Determine how many kernel launches will be needed (based on N)
         int n_launch = 1;
         bool enough_launches = false;
         int N_extended = data.size();
@@ -76,10 +69,10 @@ int main()
             else
                 enough_launches = true;
         }
-        std::cout << "Number of required kernel launches = "<< n_launch <<" (for N = " << N << ", work group size = " << workGroupSize << ")"<< std::endl;
+        std::cout << "LOG: number of required kernel launches = "<< n_launch <<" (for N = " << N << ", work group size = " << workGroupSize << ")"<< std::endl;
 
         // Vectors for storing the results for each kernel launched
-        std::vector< std::vector<float> > results(n_launch);
+        std::vector< std::vector<float> > results_mean(n_launch);
         std::vector< std::vector<float> > results_var(n_launch);
 
         for(int ilaunch = 0; ilaunch < n_launch; ++ilaunch)
@@ -91,76 +84,76 @@ int main()
                 numWorkGroups = data.size() / workGroupSize;
                 
                 // Result vector holding the first kernel launch partial sums
-                results[ilaunch].resize(numWorkGroups);
+                results_mean[ilaunch].resize(numWorkGroups);
 
                 // Create buffers
                 cl::Buffer buf_in(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, sizeof(float) * data.size(), data.data());
                 cl::Buffer buf_out(context, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, sizeof(float) * numWorkGroups);
 
                 // reduction kernel takes 3 arguments
-                kernel.setArg(0, buf_in);                                 //__global float* data
-                kernel.setArg(1, sizeof(float) * workGroupSize, nullptr); //__local float* localData
-                kernel.setArg(2, buf_out);                                //__global float* result
+                kernel_reduction.setArg(0, buf_in);                                 //__global float* data
+                kernel_reduction.setArg(1, sizeof(float) * workGroupSize, nullptr); //__local float* localData
+                kernel_reduction.setArg(2, buf_out);                                //__global float* result
 
 
                 // Start kernel and read the buf_out
-                queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(N), cl::NDRange(workGroupSize));
-                queue.enqueueReadBuffer(buf_out, true, 0, sizeof(float) * numWorkGroups, results[ilaunch].data());
+                queue.enqueueNDRangeKernel(kernel_reduction, cl::NullRange, cl::NDRange(N), cl::NDRange(workGroupSize));
+                queue.enqueueReadBuffer(buf_out, true, 0, sizeof(float) * numWorkGroups, results_mean[ilaunch].data());
             }
             // If more kernel launches are needed but not the last kernel launch
             else if ((ilaunch > 0) && (ilaunch < (n_launch - 1)))
             {
                 // Check if N % workGroupSize is 0, if not, append 0s to data
-                N = results[ilaunch - 1].size();
+                N = results_mean[ilaunch - 1].size();
                 if (N % workGroupSize != 0)
                 {
-                    results[ilaunch - 1].resize(N + (workGroupSize - (N % workGroupSize)), 0.0);
-                    std::cout << "ilaunch" <<ilaunch << ": resize was needed, from N = " << N << " to N = " << results[ilaunch - 1].size() << " (appended elements are zeros)!" <<std::endl;
-                    N = results[ilaunch - 1].size();
+                    results_mean[ilaunch - 1].resize(N + (workGroupSize - (N % workGroupSize)), 0.0);
+                    std::cout << "LOG: mean computation ilaunch" <<ilaunch << ": resize was needed, from N = " << N << " to N = " << results_mean[ilaunch - 1].size() << " (appended elements are zeros)!" <<std::endl;
+                    N = results_mean[ilaunch - 1].size();
                 }
                 // Number of work groups
-                numWorkGroups = results[ilaunch - 1].size() / workGroupSize;
+                numWorkGroups = results_mean[ilaunch - 1].size() / workGroupSize;
 
                 // Result vector holding the (ilaunch+1)th kernel launch partial sums
-                results[ilaunch].resize(numWorkGroups);
+                results_mean[ilaunch].resize(numWorkGroups);
 
                 // Create buffers
-                cl::Buffer buf_in(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, sizeof(float) * results[ilaunch - 1].size(), results[ilaunch - 1].data());
+                cl::Buffer buf_in(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, sizeof(float) * results_mean[ilaunch - 1].size(), results_mean[ilaunch - 1].data());
                 cl::Buffer buf_out(context, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, sizeof(float) * numWorkGroups);
 
                 // reduction kernel takes 3 arguments
-                kernel.setArg(0, buf_in);                                 //__global float* data
-                kernel.setArg(1, sizeof(float) * workGroupSize, nullptr); //__local float* localData
-                kernel.setArg(2, buf_out);                                //__global float* result
+                kernel_reduction.setArg(0, buf_in);                                 //__global float* data
+                kernel_reduction.setArg(1, sizeof(float) * workGroupSize, nullptr); //__local float* localData
+                kernel_reduction.setArg(2, buf_out);                                //__global float* result
 
 
                 // Start kernel and read the buf_out
-                queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(N), cl::NDRange(workGroupSize));
-                queue.enqueueReadBuffer(buf_out, true, 0, sizeof(float) * numWorkGroups, results[ilaunch].data());
+                queue.enqueueNDRangeKernel(kernel_reduction, cl::NullRange, cl::NDRange(N), cl::NDRange(workGroupSize));
+                queue.enqueueReadBuffer(buf_out, true, 0, sizeof(float) * numWorkGroups, results_mean[ilaunch].data());
 
             }
             // Last kernel launch
             else if (ilaunch == (n_launch - 1))
             {
                 // Check if N % workGroupSize is 0, if not, append 0s to data
-                N = results[ilaunch - 1].size();
+                N = results_mean[ilaunch - 1].size();
                 if (N % workGroupSize != 0)
                 {
-                    results[ilaunch - 1].resize(N + (workGroupSize - (N % workGroupSize)), 0.0);
-                    std::cout << "ilaunch" <<ilaunch << ": resize was needed, from N = " << N << " to N = " << results[ilaunch - 1].size() << " (appended elements are zeros)!" <<std::endl;
-                    N = results[ilaunch - 1].size();
+                    results_mean[ilaunch - 1].resize(N + (workGroupSize - (N % workGroupSize)), 0.0);
+                    std::cout << "LOG: mean computation ilaunch" <<ilaunch << ": resize was needed, from N = " << N << " to N = " << results_mean[ilaunch - 1].size() << " (appended elements are zeros)!" <<std::endl;
+                    N = results_mean[ilaunch - 1].size();
                 }
                 // Number of work groups
-                numWorkGroups = results[ilaunch - 1].size() / workGroupSize;
+                numWorkGroups = results_mean[ilaunch - 1].size() / workGroupSize;
 
                 // Result vector holding the (ilaunch+1)th kernel launch partial sums
-                results[ilaunch].resize(numWorkGroups);
+                results_mean[ilaunch].resize(numWorkGroups);
 
                 // Create buffers
-                cl::Buffer buf_in(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, sizeof(float) * results[ilaunch - 1].size(), results[ilaunch - 1].data());
+                cl::Buffer buf_in(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, sizeof(float) * results_mean[ilaunch - 1].size(), results_mean[ilaunch - 1].data());
                 cl::Buffer buf_out(context, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, sizeof(float) * numWorkGroups);
 
-                // reduction kernel takes 3 arguments
+                // mean kernel takes 4 arguments
                 kernel_mean.setArg(0, buf_in);                                 //__global float* data
                 kernel_mean.setArg(1, sizeof(float) * workGroupSize, nullptr); //__local float* localData
                 kernel_mean.setArg(2, buf_out);                                //__global float* result
@@ -169,15 +162,15 @@ int main()
 
                 // Start kernel and read the buf_out
                 queue.enqueueNDRangeKernel(kernel_mean, cl::NullRange, cl::NDRange(N), cl::NDRange(workGroupSize));
-                queue.enqueueReadBuffer(buf_out, true, 0, sizeof(float) * numWorkGroups, results[ilaunch].data());
+                queue.enqueueReadBuffer(buf_out, true, 0, sizeof(float) * numWorkGroups, results_mean[ilaunch].data());
             }
         }
 
-        std::cout << "\n number of elements in last result vector  = " << results[n_launch - 1].size() << std::endl;
-        float mean_of_data = results[n_launch - 1][0];
+        std::cout << "LOG: number of elements in last results_mean vector  = " << results_mean[n_launch - 1].size() << std::endl;
+        float mean_of_data = results_mean[n_launch - 1][0];
         std::cout << "###############################" << std::endl;
         std::cout << "Mean of the input data = " << mean_of_data << std::endl;
-        std::cout << "###############################" << std::endl;
+        std::cout << "###############################\n" << std::endl;
 
         for(int ilaunch = 0; ilaunch < n_launch; ++ilaunch)
         {
@@ -187,7 +180,7 @@ int main()
             {
                 numWorkGroups = data.size() / workGroupSize;
                 
-                // Result vector holding the first kernel launch partial sums
+                // Result vector holding the first kernel launch partial var sums
                 results_var[ilaunch].resize(numWorkGroups);
 
                 // Create buffers
@@ -204,7 +197,8 @@ int main()
                 queue.enqueueNDRangeKernel(kernel_var_reduction, cl::NullRange, cl::NDRange(N), cl::NDRange(workGroupSize));
                 queue.enqueueReadBuffer(buf_out, true, 0, sizeof(float) * numWorkGroups, results_var[ilaunch].data());
             }
-            // If more kernel launches are needed but not the last kernel launch
+
+            // If more kernel launches are needed but not the last kernel launch: simply reduction problem
             else if ((ilaunch > 0) && (ilaunch < (n_launch - 1)))
             {
                 // Check if N % workGroupSize is 0, if not, append 0s to data
@@ -212,7 +206,7 @@ int main()
                 if (N % workGroupSize != 0)
                 {
                     results_var[ilaunch - 1].resize(N + (workGroupSize - (N % workGroupSize)), 0.0);
-                    std::cout << "ilaunch" <<ilaunch << ": resize was needed, from N = " << N << " to N = " << results_var[ilaunch - 1].size() << " (appended elements are zeros)!" <<std::endl;
+                    std::cout << "LOG: var computation ilaunch" <<ilaunch << ": resize was needed, from N = " << N << " to N = " << results_var[ilaunch - 1].size() << " (appended elements are zeros)!" <<std::endl;
                     N = results_var[ilaunch - 1].size();
                 }
                 // Number of work groups
@@ -226,17 +220,18 @@ int main()
                 cl::Buffer buf_out(context, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, sizeof(float) * numWorkGroups);
 
                 // reduction kernel takes 3 arguments
-                kernel.setArg(0, buf_in);                                 //__global float* data
-                kernel.setArg(1, sizeof(float) * workGroupSize, nullptr); //__local float* localData
-                kernel.setArg(2, buf_out);                                //__global float* result
+                kernel_reduction.setArg(0, buf_in);                                 //__global float* data
+                kernel_reduction.setArg(1, sizeof(float) * workGroupSize, nullptr); //__local float* localData
+                kernel_reduction.setArg(2, buf_out);                                //__global float* result
 
 
                 // Start kernel and read the buf_out
-                queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(N), cl::NDRange(workGroupSize));
+                queue.enqueueNDRangeKernel(kernel_reduction, cl::NullRange, cl::NDRange(N), cl::NDRange(workGroupSize));
                 queue.enqueueReadBuffer(buf_out, true, 0, sizeof(float) * numWorkGroups, results_var[ilaunch].data());
 
             }
-            // Last kernel launch
+
+            // Last kernel launch: reduction then division by N-1
             else if (ilaunch == (n_launch - 1))
             {
                 // Check if N % workGroupSize is 0, if not, append 0s to data
@@ -244,7 +239,7 @@ int main()
                 if (N % workGroupSize != 0)
                 {
                     results_var[ilaunch - 1].resize(N + (workGroupSize - (N % workGroupSize)), 0.0);
-                    std::cout << "ilaunch" <<ilaunch << ": resize was needed, from N = " << N << " to N = " << results_var[ilaunch - 1].size() << " (appended elements are zeros)!" <<std::endl;
+                    std::cout << "LOG: var computation ilaunch" <<ilaunch << ": resize was needed, from N = " << N << " to N = " << results_var[ilaunch - 1].size() << " (appended elements are zeros)!" <<std::endl;
                     N = results_var[ilaunch - 1].size();
                 }
                 // Number of work groups
@@ -258,21 +253,23 @@ int main()
                 cl::Buffer buf_out(context, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, sizeof(float) * numWorkGroups);
 
                 // var kernel takes 4 arguments
-                kernel_var.setArg(0, buf_in);                                 //__global float* data
-                kernel_var.setArg(1, sizeof(float) * workGroupSize, nullptr); //__local float* localData
-                kernel_var.setArg(2, buf_out);                                //__global float* result
-                kernel_var.setArg(3, N_original);                             //int N_original_dataset
+                kernel_mean.setArg(0, buf_in);                                 //__global float* data
+                kernel_mean.setArg(1, sizeof(float) * workGroupSize, nullptr); //__local float* localData
+                kernel_mean.setArg(2, buf_out);                                //__global float* result
+                kernel_mean.setArg(3, N_original -1);                          //for sample mean we need N-1
 
                 // Start kernel and read the buf_out
-                queue.enqueueNDRangeKernel(kernel_var, cl::NullRange, cl::NDRange(N), cl::NDRange(workGroupSize));
+                queue.enqueueNDRangeKernel(kernel_mean, cl::NullRange, cl::NDRange(N), cl::NDRange(workGroupSize));
                 queue.enqueueReadBuffer(buf_out, true, 0, sizeof(float) * numWorkGroups, results_var[ilaunch].data());
             }
         }
-        std::cout << "\n number of elements in last result_var vector  = " << results_var[n_launch - 1].size() << std::endl;
+        std::cout << "LOG: number of elements in last results_var vector  = " << results_var[n_launch - 1].size() << std::endl;
         float var_of_data = results_var[n_launch - 1][0];
         std::cout << "###############################" << std::endl;
         std::cout << "Var of the input data = " << var_of_data << std::endl;
-        std::cout << "###############################" << std::endl;
+        std::cout << "###############################\n" << std::endl;
+
+        
 
 
        
