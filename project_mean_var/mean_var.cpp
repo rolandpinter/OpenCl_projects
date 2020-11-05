@@ -34,18 +34,17 @@ int main()
         program_var_reduction.build({ device});
 
         // Create input data vector and fill with random numbers
-        size_t N_original = 513;                       // N should be between 2 - 2^24 (=16777216) for the project
+        size_t N_original = 16777216;                       // N should be between 2 - 2^24 (=16777216) for the project
         size_t N = N_original;                        // Will be overwritten at each kernel launches
+        
         std::vector<float> data_original(N_original); // Original input data (needed in original shape for CPU calculations)
         std::vector<float> data(N);                   // Will be resized, appended with 0s if size != workgroupsize * even number
 
-        /*
+        
         auto prng = [engine = std::default_random_engine{},
                      distribution = std::uniform_real_distribution<cl_float>{ 0.0, 100.0 }]() mutable { return distribution(engine); };
 
-        std::generate_n(std::begin(data_original), N_original, prng);*/
-        for(int i=0; i<N; ++i)
-            data_original[i] = i*1.0;
+        std::generate_n(std::begin(data_original), N_original, prng);
 
         data = data_original;
 
@@ -55,7 +54,8 @@ int main()
         cl::Kernel kernel_var_reduction(program_var_reduction, "var_reduction");
 
         // Access work group size 
-        auto workGroupSize = kernel_reduction.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
+        int workGroupSize = kernel_reduction.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
+        std::cout<<"LOG: work group size = " << workGroupSize<<std::endl;
         
         // Check if N % workGroupSize is 0, if not, append 0s to data
         if (N % workGroupSize != 0)
@@ -64,6 +64,7 @@ int main()
             std::cout << "LOG: starting data, resize was needed, from N = " << N << " to N = " << data.size() << " (appended elements are zeros)!" <<std::endl;
             N = data.size();
         }
+        size_t a = N;
         
         // Determine how many kernel launches will be needed (based on N)
         int n_launch = 1;
@@ -182,6 +183,7 @@ int main()
         float mean_GPU = results_mean[n_launch - 1][0];
 
 ///Compute var using GPU
+        N = a; // TODO!!!
         for(int ilaunch = 0; ilaunch < n_launch; ++ilaunch)
         {
             int numWorkGroups;
@@ -208,7 +210,7 @@ int main()
                 // Start kernel and read the buf_out
                 queue.enqueueNDRangeKernel(kernel_var_reduction, cl::NullRange, cl::NDRange(N), cl::NDRange(workGroupSize));
                 queue.enqueueReadBuffer(buf_out, true, 0, sizeof(float) * numWorkGroups, results_var[ilaunch].data());
-                for(int i=0;i<results_var[0].size();++i) std::cout<<results_var[0][i]<<std::endl;
+                for(int i=0;i<results_var[0].size();++i) std::cout<<results_var[ilaunch][i]<<std::endl;
             }
 
             // If more kernel launches are needed but not the last kernel launch: simply reduction problem
