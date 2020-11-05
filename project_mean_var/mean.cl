@@ -25,7 +25,7 @@ __kernel void mean(__global float* data, __local float* localData, __global floa
 
      if(lid == 0)
      {
-         // id of the workgroup = get_group_id()
+        // id of the workgroup = get_group_id()
         result[get_group_id(0)] =  localData[0] / N;
      }
 }

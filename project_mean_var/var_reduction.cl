@@ -10,7 +10,8 @@ __kernel void var_reduction(__global float* data, __local float* localData, __gl
     if (gid < N_original)
         localData[lid] = ((data[gid] - mean) * (data[gid] - mean));
     else
-        localData[lid] = 0; 
+        localData[lid] = 0;
+    
     // make sure everything up to this point in the workgroup finished executing
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -29,7 +30,7 @@ __kernel void var_reduction(__global float* data, __local float* localData, __gl
 
      if(lid == 0)
      {
-         // id of the workgroup = get_group_id()
+        // id of the workgroup = get_group_id()
         result[get_group_id(0)] =  localData[0];
      }
 }
