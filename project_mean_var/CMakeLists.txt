@@ -13,7 +13,6 @@ set(CMAKE_MODULE_PATH
 find_package(OpenCL REQUIRED)
 find_package(Threads REQUIRED)
 
-set(Headers mean_var.hpp)
 set(Sources mean_var.cpp)
 
 add_executable(${PROJECT_NAME}
