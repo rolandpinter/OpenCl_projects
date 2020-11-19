@@ -12,7 +12,14 @@
 #include <chrono>
 #include <numeric>
 
-int number_of_kernel_launches(int N_extended, int workGroupSize);
+int number_of_kernel_launches(size_t N, size_t workGroupSize, bool logging);
+std::vector<size_t> determine_buffer_sizes(size_t N, size_t workGroupSize, bool logging);
+std::vector<size_t> determine_global_work_sizes(int n_launch, size_t N, size_t workGroupSize, bool logging);
+std::vector<size_t> determine_data_sizes_to_reduce(int n_launch, size_t N, size_t workGroupSize, bool logging);
+float compute_mean_gpu(std::vector<cl::Buffer> vec_of_bufs, int n_launch, size_t N, size_t workGroupSize,
+                       std::vector<size_t> data_sizes_to_reduce, std::vector<size_t> global_work_sizes,
+                       cl::Kernel kernel_mean, cl::CommandQueue queue);
+
 void print_results(float mean, float var, bool gpu_results);
 float compute_mean_cpu(std::vector<float> data_original, int N_original);
 float compute_var_cpu(std::vector<float> data_original, int N_original, float mean_CPU);
@@ -52,121 +59,30 @@ int main()
         cl::Kernel kernel_mean(program_mean, "mean_reduction");
 
         // Access work group size 
-        int workGroupSize = kernel_mean.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
+        size_t workGroupSize = kernel_mean.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
         
         // Determine how many kernel launches will be needed (based on N)
-        int n_launch = number_of_kernel_launches(N, workGroupSize);
+        int n_launch = number_of_kernel_launches(N, workGroupSize, true);
 
         // Create a vector holding the 3 buffers required (buf1, buf2, buf3)
         std::vector<cl::Buffer> vec_of_bufs(3);
 
-        // Determine sizes of buffers:
-        // n1 = size of buf1 = size of input data
-        // n2 = size of buf2 = how many work groups will handle the reduction of the input data
-        // n3 = size of buf3 = how many work groups will handle the reduction of the result stored in buf2
-        size_t n1 = N;
-        size_t n2 = 0;
-        if (N % workGroupSize == 0)
-            n2 = N / workGroupSize;
-        else
-            n2 = N / workGroupSize + 1;
-        
-        size_t n3 = 0;
-        if (n2 % workGroupSize == 0)
-            n3 = n2 / workGroupSize;
-        else
-            n3 = n2 / workGroupSize + 1;
-
-        std::cout << "LOG: Buffer sizes" << std::endl;
-        std::cout << "\t n1 = " << n1 << std::endl;
-        std::cout << "\t n2 = " << n2 << std::endl;
-        std::cout << "\t n3 = " << n3 << std::endl;
+        // Determine buffer sizes
+        std::vector<size_t>  buf_sizes = determine_buffer_sizes(N, workGroupSize, true);
 
         // Construct the buffers
-        vec_of_bufs[0] = cl::Buffer(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, sizeof(float) * n1, data.data());
-        vec_of_bufs[1] = cl::Buffer(context, CL_MEM_READ_WRITE | CL_MEM_HOST_READ_ONLY, sizeof(float) * n2, nullptr);
-        vec_of_bufs[2] = cl::Buffer(context, CL_MEM_READ_WRITE | CL_MEM_HOST_READ_ONLY, sizeof(float) * n3, nullptr);
+        vec_of_bufs[0] = cl::Buffer(context, CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COPY_HOST_PTR, sizeof(float) * buf_sizes[0], data.data());
+        vec_of_bufs[1] = cl::Buffer(context, CL_MEM_READ_WRITE | CL_MEM_HOST_READ_ONLY, sizeof(float) * buf_sizes[1], nullptr);
+        vec_of_bufs[2] = cl::Buffer(context, CL_MEM_READ_WRITE | CL_MEM_HOST_READ_ONLY, sizeof(float) * buf_sizes[2], nullptr);
 
-        // Determine enqueueNDRangeKernel's global work sizes
-        std::vector<size_t> global_work_sizes(n_launch);
-
-        // First element is the data size extended to the next (even number * work group size)
-        if (N % workGroupSize == 0) 
-            global_work_sizes[0] = N;
-        else 
-            global_work_sizes[0] = N + (workGroupSize - (N % workGroupSize));
-        
-        // Later elements are the previous element divided by work group size extended to the next (even number * work group size)
-        for (int iLaunch = 1; iLaunch < n_launch; ++iLaunch)
-        {
-            if ((global_work_sizes[iLaunch - 1] / workGroupSize) % workGroupSize == 0) 
-                global_work_sizes[iLaunch] = global_work_sizes[iLaunch - 1] / workGroupSize;
-            else 
-                global_work_sizes[iLaunch] = (global_work_sizes[iLaunch - 1] / workGroupSize) + (workGroupSize - ((global_work_sizes[iLaunch - 1] / workGroupSize) % workGroupSize));
-        }
-        std::cout << "LOG: Computed Global sizes" << std::endl;
-        for(int iLaunch = 0; iLaunch < global_work_sizes.size(); ++iLaunch)
-            std::cout << "\t iLaunch " << iLaunch << ": " << global_work_sizes[iLaunch] << std::endl;
+        // Determine global work sizes for the started kernels
+        std::vector<size_t> global_work_sizes = determine_global_work_sizes(n_launch, N, workGroupSize, true);
 
         // Determine data sizes to reduce during each kernel calls
-        std::vector<size_t> data_sizes_to_reduce(n_launch);
-        
-        // First element is the size of the input data
-        data_sizes_to_reduce[0] = N;
-
-        for (int iLaunch = 1; iLaunch < n_launch; ++iLaunch)
-        {
-            if (data_sizes_to_reduce[iLaunch - 1] % workGroupSize == 0)
-                data_sizes_to_reduce[iLaunch] = data_sizes_to_reduce[iLaunch - 1] / workGroupSize;
-            else
-                data_sizes_to_reduce[iLaunch] = data_sizes_to_reduce[iLaunch - 1] / workGroupSize + 1;
-        }
-
-        std::cout << "LOG: Number of data to reduce" << std::endl;
-        for(int iLaunch = 0; iLaunch < n_launch; ++iLaunch)
-            std::cout << "\t iLaunch " << iLaunch << ": " << data_sizes_to_reduce[iLaunch] << std::endl;
+        std::vector<size_t> data_sizes_to_reduce = determine_data_sizes_to_reduce(n_launch, N, workGroupSize, true);
 
         // Compute mean using GPU
-        float gpu_mean = 0.0;
-
-        // First kernel launch
-        kernel_mean.setArg(0, vec_of_bufs[0]);                         //__global float* data
-        kernel_mean.setArg(1, sizeof(float) * workGroupSize, nullptr); //__local float* localData
-        kernel_mean.setArg(2, vec_of_bufs[1]);                         //__global float* result
-        kernel_mean.setArg(3, 0);                                      // int iLaunch
-        kernel_mean.setArg(4, n_launch - 1);                           // int lastLaunchIndex
-        kernel_mean.setArg(5, N);                                      // int N
-        kernel_mean.setArg(6, data_sizes_to_reduce[0]);                // int numOfValues
-        queue.enqueueNDRangeKernel(kernel_mean, cl::NullRange, cl::NDRange(global_work_sizes[0]), cl::NDRange(workGroupSize));
-        cl::finish();
-
-        // Other kernel launches
-        for(int iLaunch = 1; iLaunch < n_launch; ++iLaunch)
-        { 
-            if (iLaunch % 2 == 0)
-                kernel_mean.setArg(0, vec_of_bufs[2]);                     //__global float* data
-            else
-                kernel_mean.setArg(0, vec_of_bufs[1]);                     //__global float* data
-            
-            kernel_mean.setArg(1, sizeof(float) * workGroupSize, nullptr); //__local float* localData
-
-            if (iLaunch % 2 == 0)
-                kernel_mean.setArg(2, vec_of_bufs[1]);                     //__global float* result
-            else
-                kernel_mean.setArg(2, vec_of_bufs[2]);                     //__global float* result
-            kernel_mean.setArg(3, iLaunch);                                // int iLaunch
-            kernel_mean.setArg(4, n_launch - 1);                           // int lastLaunchIndex
-            kernel_mean.setArg(5, N);                                      // int N
-            kernel_mean.setArg(6, data_sizes_to_reduce[iLaunch]);                // int numOfValues
-            queue.enqueueNDRangeKernel(kernel_mean, cl::NullRange, cl::NDRange(global_work_sizes[iLaunch]), cl::NDRange(workGroupSize));
-            cl::finish();
-        }
-        // Read out the sample mean computed by GPU
-        if (n_launch == 1 || n_launch % 2 == 1)
-            queue.enqueueReadBuffer(vec_of_bufs[1], true, 0, sizeof(float) * 1, &gpu_mean);
-        else if(n_launch > 1 || n_launch % 2 == 0)
-            queue.enqueueReadBuffer(vec_of_bufs[2], true, 0, sizeof(float) * 1, &gpu_mean);
-        
+        float gpu_mean = compute_mean_gpu(vec_of_bufs, n_launch, N, workGroupSize, data_sizes_to_reduce, global_work_sizes, kernel_mean, queue);
         std::cout << "GPU mean = " << gpu_mean << std::endl;
 
 
@@ -214,7 +130,7 @@ int main()
     return 0;
 }/// end of main
 
-int number_of_kernel_launches(int N, int workGroupSize)
+int number_of_kernel_launches(size_t N, size_t workGroupSize, bool logging)
 {
     int n_launch = 1;
     bool enough_launches = false;
@@ -230,8 +146,150 @@ int number_of_kernel_launches(int N, int workGroupSize)
         else
             enough_launches = true;
     }
-    std::cout << "LOG: number of required kernel launches = "<< n_launch <<" (for N = " << N << ", work group size = " << workGroupSize << ")"<< std::endl;
+    if (logging)
+        std::cout << "LOG: number of required kernel launches = "<< n_launch <<" (for N = " << N << ", work group size = " << workGroupSize << ")"<< std::endl;
+    
     return n_launch;
+}
+
+std::vector<size_t> determine_buffer_sizes(size_t N, size_t workGroupSize, bool logging)
+{
+    // Determine sizes of buffers
+    std::vector<size_t> vec_of_buf_sizes(3);
+
+    // n1 = size of buf1 = size of input data
+    // n2 = size of buf2 = how many work groups will handle the reduction of the input data
+    // n3 = size of buf3 = how many work groups will handle the reduction of the result stored in buf2
+    size_t n1 = N;
+
+    size_t n2 = 0;
+    if (N % workGroupSize == 0)
+        n2 = N / workGroupSize;
+    else
+        n2 = N / workGroupSize + 1;
+    
+    size_t n3 = 0;
+    if (n2 % workGroupSize == 0)
+        n3 = n2 / workGroupSize;
+    else
+        n3 = n2 / workGroupSize + 1;
+
+    vec_of_buf_sizes[0] = n1;
+    vec_of_buf_sizes[1] = n2;
+    vec_of_buf_sizes[2] = n3;
+    
+    if (logging)
+    {
+        std::cout << "LOG: Buffer sizes" << std::endl;
+        std::cout << "\t n1 = " << n1 << std::endl;
+        std::cout << "\t n2 = " << n2 << std::endl;
+        std::cout << "\t n3 = " << n3 << std::endl;
+    }
+    
+    return vec_of_buf_sizes;
+}
+
+std::vector<size_t> determine_global_work_sizes(int n_launch, size_t N, size_t workGroupSize, bool logging)
+{
+    // Determine enqueueNDRangeKernel's global work sizes
+    std::vector<size_t> global_work_sizes(n_launch);
+
+    // First element is the data size extended to the next (even number * work group size)
+    if (N % workGroupSize == 0) 
+        global_work_sizes[0] = N;
+    else 
+        global_work_sizes[0] = N + (workGroupSize - (N % workGroupSize));
+    
+    // Later elements are the previous element divided by work group size extended to the next (even number * work group size)
+    for (int iLaunch = 1; iLaunch < n_launch; ++iLaunch)
+    {
+        if ((global_work_sizes[iLaunch - 1] / workGroupSize) % workGroupSize == 0) 
+            global_work_sizes[iLaunch] = global_work_sizes[iLaunch - 1] / workGroupSize;
+        else 
+            global_work_sizes[iLaunch] = (global_work_sizes[iLaunch - 1] / workGroupSize) + (workGroupSize - ((global_work_sizes[iLaunch - 1] / workGroupSize) % workGroupSize));
+    }
+
+    if (logging)
+    {
+        std::cout << "LOG: Computed Global sizes" << std::endl;
+        for(int iLaunch = 0; iLaunch < global_work_sizes.size(); ++iLaunch)
+            std::cout << "\t iLaunch " << iLaunch << ": " << global_work_sizes[iLaunch] << std::endl;
+    }
+
+    return global_work_sizes;
+}
+
+std::vector<size_t> determine_data_sizes_to_reduce(int n_launch, size_t N, size_t workGroupSize, bool logging)
+{
+    // Determine data sizes to reduce during each kernel calls
+    std::vector<size_t> data_sizes_to_reduce(n_launch);
+    
+    // First element is the size of the input data
+    data_sizes_to_reduce[0] = N;
+
+    for (int iLaunch = 1; iLaunch < n_launch; ++iLaunch)
+    {
+        if (data_sizes_to_reduce[iLaunch - 1] % workGroupSize == 0)
+            data_sizes_to_reduce[iLaunch] = data_sizes_to_reduce[iLaunch - 1] / workGroupSize;
+        else
+            data_sizes_to_reduce[iLaunch] = data_sizes_to_reduce[iLaunch - 1] / workGroupSize + 1;
+    }
+
+    if (logging)
+    {
+        std::cout << "LOG: Number of data to reduce" << std::endl;
+        for(int iLaunch = 0; iLaunch < n_launch; ++iLaunch)
+            std::cout << "\t iLaunch " << iLaunch << ": " << data_sizes_to_reduce[iLaunch] << std::endl;
+    }
+
+    return data_sizes_to_reduce;
+}
+
+float compute_mean_gpu(std::vector<cl::Buffer> vec_of_bufs, int n_launch, size_t N, size_t workGroupSize,
+                       std::vector<size_t> data_sizes_to_reduce, std::vector<size_t> global_work_sizes,
+                       cl::Kernel kernel_mean, cl::CommandQueue queue)
+{
+    // Compute mean using GPU
+    float gpu_mean = 0.0;
+    // First kernel launch
+    kernel_mean.setArg(0, vec_of_bufs[0]);                         //__global float* data
+    kernel_mean.setArg(1, sizeof(float) * workGroupSize, nullptr); //__local float* localData
+    kernel_mean.setArg(2, vec_of_bufs[1]);                         //__global float* result
+    kernel_mean.setArg(3, 0);                                      // int iLaunch
+    kernel_mean.setArg(4, n_launch - 1);                           // int lastLaunchIndex
+    kernel_mean.setArg(5, N);                                      // int N
+    kernel_mean.setArg(6, data_sizes_to_reduce[0]);                // int numOfValues
+    queue.enqueueNDRangeKernel(kernel_mean, cl::NullRange, cl::NDRange(global_work_sizes[0]), cl::NDRange(workGroupSize));
+    cl::finish();
+
+    // Other kernel launches
+    for(int iLaunch = 1; iLaunch < n_launch; ++iLaunch)
+    { 
+        if (iLaunch % 2 == 0)
+            kernel_mean.setArg(0, vec_of_bufs[2]);                     //__global float* data
+        else
+            kernel_mean.setArg(0, vec_of_bufs[1]);                     //__global float* data
+        
+        kernel_mean.setArg(1, sizeof(float) * workGroupSize, nullptr); //__local float* localData
+
+        if (iLaunch % 2 == 0)
+            kernel_mean.setArg(2, vec_of_bufs[1]);                     //__global float* result
+        else
+            kernel_mean.setArg(2, vec_of_bufs[2]);                     //__global float* result
+        kernel_mean.setArg(3, iLaunch);                                // int iLaunch
+        kernel_mean.setArg(4, n_launch - 1);                           // int lastLaunchIndex
+        kernel_mean.setArg(5, N);                                      // int N
+        kernel_mean.setArg(6, data_sizes_to_reduce[iLaunch]);                // int numOfValues
+        queue.enqueueNDRangeKernel(kernel_mean, cl::NullRange, cl::NDRange(global_work_sizes[iLaunch]), cl::NDRange(workGroupSize));
+        cl::finish();
+    }
+    // Read out the sample mean computed by GPU
+    if (n_launch == 1 || n_launch % 2 == 1)
+        queue.enqueueReadBuffer(vec_of_bufs[1], true, 0, sizeof(float) * 1, &gpu_mean);
+    else if(n_launch > 1 || n_launch % 2 == 0)
+        queue.enqueueReadBuffer(vec_of_bufs[2], true, 0, sizeof(float) * 1, &gpu_mean);
+
+    return gpu_mean;
 }
 
 void print_results(float mean, float var, bool gpu_results)
