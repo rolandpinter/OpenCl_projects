@@ -19,7 +19,9 @@ std::vector<size_t> determine_data_sizes_to_reduce(int n_launch, size_t N, size_
 float compute_mean_gpu(std::vector<cl::Buffer> vec_of_bufs, int n_launch, size_t N, size_t workGroupSize,
                        std::vector<size_t> data_sizes_to_reduce, std::vector<size_t> global_work_sizes,
                        cl::Kernel kernel_mean, cl::CommandQueue queue);
-
+float compute_var_gpu(std::vector<cl::Buffer> vec_of_bufs, int n_launch, size_t N, size_t workGroupSize,
+                       std::vector<size_t> data_sizes_to_reduce, std::vector<size_t> global_work_sizes,
+                       cl::Kernel kernel_var, cl::CommandQueue queue, float gpu_mean);
 void print_results(float mean, float var, bool gpu_results);
 float compute_mean_cpu(std::vector<float> data_original, int N_original);
 float compute_var_cpu(std::vector<float> data_original, int N_original, float mean_CPU);
@@ -37,14 +39,20 @@ int main()
         
         // Load kernel source files
         std::ifstream source_file_mean{ "../mean_reduction.cl" }; // kernel performing sample mean calculation
+        std::ifstream source_file_var{ "../var_reduction.cl" };   // kernel performing sample var calculation
         if (!source_file_mean.is_open())
             throw std::runtime_error{ std::string{ "Cannot open kernel source: " } + "mean_reduction.cl" };
+        if (!source_file_var.is_open())
+            throw std::runtime_error{ std::string{ "Cannot open kernel source: " } + "var_reduction.cl" };
     
         // Create cl::Program from kernels and build them for the device
         cl::Program program_mean{ std::string{ std::istreambuf_iterator<char>{ source_file_mean },
                                   std::istreambuf_iterator<char>{} } };
+        cl::Program program_var{ std::string{ std::istreambuf_iterator<char>{ source_file_var },
+                                 std::istreambuf_iterator<char>{} } };
 
         program_mean.build({ device });
+        program_var.build({ device });
 
         // Create input data vector and fill with random numbers
         size_t N = 512*512*512 + 1;
@@ -57,6 +65,7 @@ int main()
 
         // Create kernels from programs
         cl::Kernel kernel_mean(program_mean, "mean_reduction");
+        cl::Kernel kernel_var(program_var, "var_reduction");
 
         // Access work group size 
         size_t workGroupSize = kernel_mean.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
@@ -83,29 +92,23 @@ int main()
 
         // Compute mean using GPU
         float gpu_mean = compute_mean_gpu(vec_of_bufs, n_launch, N, workGroupSize, data_sizes_to_reduce, global_work_sizes, kernel_mean, queue);
-        std::cout << "GPU mean = " << gpu_mean << std::endl;
 
+        // Compute var using GPU
+        float gpu_var = compute_var_gpu(vec_of_bufs, n_launch, N, workGroupSize, data_sizes_to_reduce, global_work_sizes, kernel_var, queue, gpu_mean);
 
-
-
-
-
-
-
-
-
-
+        // Print out GPU results
+        print_results(gpu_mean, gpu_var, true);
 
         // Perform mean and var CPU reference calculations
-        float mean_CPU = compute_mean_cpu(data, N);
-        float var_CPU = compute_var_cpu(data, N, mean_CPU);
-
+        float cpu_mean = compute_mean_cpu(data, N);
+        float cpu_var = compute_var_cpu(data, N, cpu_mean);
+        
         // Print out CPU results
-        print_results(mean_CPU, var_CPU, false);
+        print_results(cpu_mean, cpu_var, false);
 
         // Check if mean and var computed by GPU and CPU are the same within small tolerance
-        //float tolerance = 1e-6;
-        //compare_cpu_gpu_results(mean_CPU, mean_GPU, var_CPU, var_GPU, tolerance);
+        float tolerance = 1e-6;
+        compare_cpu_gpu_results(cpu_mean, gpu_mean, cpu_var, gpu_var, tolerance);
 
     }/// end of try case
     
@@ -290,6 +293,55 @@ float compute_mean_gpu(std::vector<cl::Buffer> vec_of_bufs, int n_launch, size_t
         queue.enqueueReadBuffer(vec_of_bufs[2], true, 0, sizeof(float) * 1, &gpu_mean);
 
     return gpu_mean;
+}
+
+float compute_var_gpu(std::vector<cl::Buffer> vec_of_bufs, int n_launch, size_t N, size_t workGroupSize,
+                       std::vector<size_t> data_sizes_to_reduce, std::vector<size_t> global_work_sizes,
+                       cl::Kernel kernel_var, cl::CommandQueue queue, float gpu_mean)
+{
+    // Compute var using GPU
+    float gpu_var = 0.0;
+    // First kernel launch
+    kernel_var.setArg(0, vec_of_bufs[0]);                         //__global float* data
+    kernel_var.setArg(1, sizeof(float) * workGroupSize, nullptr); //__local float* localData
+    kernel_var.setArg(2, vec_of_bufs[1]);                         //__global float* result
+    kernel_var.setArg(3, 0);                                      // int iLaunch
+    kernel_var.setArg(4, n_launch - 1);                           // int lastLaunchIndex
+    kernel_var.setArg(5, N);                                      // int N
+    kernel_var.setArg(6, data_sizes_to_reduce[0]);                // int numOfValues
+    kernel_var.setArg(7, gpu_mean);                               // float mean
+    queue.enqueueNDRangeKernel(kernel_var, cl::NullRange, cl::NDRange(global_work_sizes[0]), cl::NDRange(workGroupSize));
+    cl::finish();
+
+    // Other kernel launches
+    for(int iLaunch = 1; iLaunch < n_launch; ++iLaunch)
+    { 
+        if (iLaunch % 2 == 0)
+            kernel_var.setArg(0, vec_of_bufs[2]);                     //__global float* data
+        else
+            kernel_var.setArg(0, vec_of_bufs[1]);                     //__global float* data
+        
+        kernel_var.setArg(1, sizeof(float) * workGroupSize, nullptr); //__local float* localData
+
+        if (iLaunch % 2 == 0)
+            kernel_var.setArg(2, vec_of_bufs[1]);                     //__global float* result
+        else
+            kernel_var.setArg(2, vec_of_bufs[2]);                     //__global float* result
+        kernel_var.setArg(3, iLaunch);                                // int iLaunch
+        kernel_var.setArg(4, n_launch - 1);                           // int lastLaunchIndex
+        kernel_var.setArg(5, N);                                      // int N
+        kernel_var.setArg(6, data_sizes_to_reduce[iLaunch]);          // int numOfValues
+        kernel_var.setArg(7, gpu_mean);                               // float mean
+        queue.enqueueNDRangeKernel(kernel_var, cl::NullRange, cl::NDRange(global_work_sizes[iLaunch]), cl::NDRange(workGroupSize));
+        cl::finish();
+    }
+    // Read out the sample mean computed by GPU
+    if (n_launch == 1 || n_launch % 2 == 1)
+        queue.enqueueReadBuffer(vec_of_bufs[1], true, 0, sizeof(float) * 1, &gpu_var);
+    else if(n_launch > 1 || n_launch % 2 == 0)
+        queue.enqueueReadBuffer(vec_of_bufs[2], true, 0, sizeof(float) * 1, &gpu_var);
+
+    return gpu_var;
 }
 
 void print_results(float mean, float var, bool gpu_results)

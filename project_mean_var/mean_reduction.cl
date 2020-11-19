@@ -1,4 +1,4 @@
-__kernel void mean_reduction(__global float* data, __local float* localData, __global float* result, int iLaunch, int lastLaunchIndex, int N, int numOfValues)
+__kernel void mean_reduction(__global float* data, __local float* localData, __global float* result, int iLaunch, int lastLaunchIndex, size_t N, size_t numOfValues)
 {
     int gid = get_global_id(0);        // id of the work item amongs every work items 
     int lid = get_local_id(0);         // id of the work item in the workgroup
