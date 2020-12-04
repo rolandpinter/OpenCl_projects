@@ -12,6 +12,8 @@
 #include <chrono>
 #include <numeric>
 
+void dump_state_of_game(char* file_base_name, unsigned int t, size_t N, std::vector<int> state_of_game);
+
 int main()
 {
     try
@@ -36,26 +38,35 @@ int main()
         cl::Kernel kernel(program, "conway");
 
         /// Init N parameter of the game: the game is played on an N * N big square grid
-        size_t N = 5;
+        size_t N = 50;
 
-        /// Create grid with random 0 and 1 values
-        std::random_device rd;                       // Only used once to initialise (seed) engine
-        std::mt19937 rng(rd());                      // Random-number engine used (Mersenne-Twister)
-        std::uniform_int_distribution<int> uni(0,1); // Uniformly and randomly 0s and 1s 
+        ///Init T parameter of the game: how many iterations we do
+        unsigned int T = 30;
 
-        std::vector<int> state_of_game(N*N); // N*N grid's representation: N*N vector
-        for(int i=0;i<N;++i)
-            for(int j=0;j<N;++j)
-                state_of_game[i * N + j] = uni(rng);
+        /// Fill grid with random cell states or with pre-defined one
+        bool random_starting_state = true;
 
-        /// Print out the starting state of the game's grid
-        std::cout << "\n \n STARTING STATE" << std::endl;
-        for(int i = 0; i < N; ++i)
+        /// Vector holding the state of the game
+        std::vector<int> state_of_game(N * N);
+
+        if (random_starting_state)
         {
-            for(int j = 0; j < N; ++j)
-                std::cout << state_of_game[i*N + j] << " ";
-            std::cout<<"\n";
+            /// Create grid with random 0 and 1 values
+            std::random_device rd;                        // Only used once to initialise (seed) engine
+            std::mt19937 rng(rd());                       // Random-number engine used (Mersenne-Twister)
+            std::uniform_int_distribution<int> uni(0, 1); // Uniformly and randomly 0s and 1s 
+
+            for(int i=0;i<N;++i)
+                for(int j=0;j<N;++j)
+                    state_of_game[i * N + j] = uni(rng);
         }
+
+        /* TODO: IMPLEMENT GLIDER
+        else
+        {
+        
+        }
+        */
 
         /// Parameters of the textures to be created
         size_t width = N;
@@ -74,58 +85,41 @@ int main()
         /// Create cl::Sampler
         cl::Sampler sampler = cl::Sampler(context, CL_FALSE, CL_ADDRESS_REPEAT, CL_FILTER_NEAREST);
 
-        // First kernel launch
-        kernel.setArg(0, vec_of_textures[0]);
-        kernel.setArg(1, vec_of_textures[1]);
-        kernel.setArg(2, sampler);
-
-        queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(N,N), cl::NullRange);
-
+        /// offset and size arrays for enqueueReadImage()
         const std::array<cl::size_type, 3> origin = {0,0,0};
         const std::array<cl::size_type, 3> region = {N, N, 1};
-        std::vector<int> output(N*N);
 
-        queue.enqueueReadImage(vec_of_textures[1], false, origin, region, 0, 0, output.data(), 0, nullptr);
-        cl::finish();
+        /// file base name for dumping out the state of the game
+        char file_base_name[] = "../csv_outputs/grid"; 
 
-        std::cout << "\n \n SECOND STATE" << std::endl;
-        for(int i = 0; i < N; ++i)
+        /// Play the game T times
+        for(unsigned int t = 0; t < T; ++t)
         {
-            for(int j = 0; j < N; ++j)
-                std::cout << output[i*N + j] << " ";
-            std::cout<<"\n";
+            /// Print out the state of the game csv files
+            dump_state_of_game(file_base_name, t, N, state_of_game);
+            /// Set kernel arguments
+            if (t % 2 == 0)
+            {
+                kernel.setArg(0, vec_of_textures[0]);
+                kernel.setArg(1, vec_of_textures[1]);
+            }
+            else
+            {
+                kernel.setArg(0, vec_of_textures[1]);
+                kernel.setArg(1, vec_of_textures[0]);
+            }
+            kernel.setArg(2, sampler);
+
+            /// Launch kernel
+            queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(N,N), cl::NullRange);
+
+            /// Read the state of the game
+            if (t % 2 == 0)
+                queue.enqueueReadImage(vec_of_textures[1], false, origin, region, 0, 0, state_of_game.data(), 0, nullptr);
+            else
+                queue.enqueueReadImage(vec_of_textures[0], false, origin, region, 0, 0, state_of_game.data(), 0, nullptr);
+            cl::finish();
         }
-
-
-
-        
-
-        
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
     }/// end of try case
@@ -150,3 +144,23 @@ int main()
 
     return 0;
 }/// end of main
+
+void dump_state_of_game(char* file_base_name, unsigned int t, size_t N, std::vector<int> state_of_game)
+{
+    std::stringstream outpath;
+    outpath << file_base_name << t << ".csv";
+
+    std::ofstream file(outpath.str().c_str());
+
+    for(int i = 0; i < N; ++i)
+    {
+        for(int j = 0; j < N; ++j)
+        {
+            if(state_of_game[i * N + j] == 1) file << "1";
+            else if(state_of_game[i * N + j] == 0) file << "0";
+            if (j < N - 1) file << ",";
+        }
+        file << "\n";
+   }
+   file.close();
+}
