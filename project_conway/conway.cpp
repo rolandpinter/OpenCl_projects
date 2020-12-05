@@ -41,7 +41,7 @@ int main()
         size_t N = 64;
 
         ///Init T parameter of the game: how many iterations we do
-        unsigned int T = 30;
+        unsigned int T = 300;
 
         /// Fill grid with random cell states or with pre-defined one
         bool random_starting_state = false;
@@ -101,6 +101,9 @@ int main()
                 else if(i == (8*N + 16)) state_of_game[i] = 1;
                 else if(i == (9*N + 13)) state_of_game[i] = 1;
                 else if(i == (9*N + 14)) state_of_game[i] = 1;
+                
+
+               
 
                 // Others are dead
                 else state_of_game[i] = 0;
@@ -158,8 +161,10 @@ int main()
                 queue.enqueueReadImage(vec_of_textures[1], true, origin, region, 0, 0, state_of_game.data(), 0, nullptr);
             else
                 queue.enqueueReadImage(vec_of_textures[0], true, origin, region, 0, 0, state_of_game.data(), 0, nullptr);
+               
             
         }
+
 
 
     }/// end of try case

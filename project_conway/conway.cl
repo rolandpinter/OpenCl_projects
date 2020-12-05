@@ -26,21 +26,21 @@ __kernel void conway(read_only image2d_t previous, write_only image2d_t next, sa
     /// Evaluate next state of cell
     // (1) Any live cell with fewer than two live neighbours dies, as if by underpopulation
     if (current_cell_state == 1 && n_living_neighbors < 2)
-        write_imagei(next, int2(x,y), (int4)(0, 0, 0, 0));
+        write_imagei(next, (int2)(x,y), (int4)(0, 0, 0, 0));
 
     // (2) Any live cell with two or three live neighbours lives on to the next generation
     else if (current_cell_state == 1 && (n_living_neighbors >= 2 && n_living_neighbors <= 3))
-        write_imagei(next, int2(x,y), (int4)(1, 0, 0, 0));
+        write_imagei(next, (int2)(x,y), (int4)(1, 0, 0, 0));
     
     // (3) Any live cell with more than three live neighbours dies, as if by overpopulation
     else if (current_cell_state == 1 && n_living_neighbors > 3)
-        write_imagei(next, int2(x,y), (int4)(0, 0, 0, 0));
+        write_imagei(next, (int2)(x,y), (int4)(0, 0, 0, 0));
 
     // (4) Any dead cell with exactly three live neighbours becomes a live cell, as if by reproduction
     else if (current_cell_state == 0 && n_living_neighbors == 3)
-        write_imagei(next, int2(x,y), (int4)(1, 0, 0, 0));
+        write_imagei(next, (int2)(x,y), (int4)(1, 0, 0, 0));
 
     // (5) Any dead cell with less or more than three live neighbours dies
     else if (current_cell_state == 0 && n_living_neighbors != 3)
-        write_imagei(next, int2(x,y), (int4)(0, 0, 0, 0));
+        write_imagei(next, (int2)(x,y), (int4)(0, 0, 0, 0));
 }
