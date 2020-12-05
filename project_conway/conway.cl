@@ -29,7 +29,7 @@ __kernel void conway(read_only image2d_t previous, write_only image2d_t next, sa
         write_imagei(next, int2(x,y), (int4)(0, 0, 0, 0));
 
     // (2) Any live cell with two or three live neighbours lives on to the next generation
-    else if (current_cell_state == 1 && (n_living_neighbors == 2 || n_living_neighbors == 3))
+    else if (current_cell_state == 1 && (n_living_neighbors >= 2 && n_living_neighbors <= 3))
         write_imagei(next, int2(x,y), (int4)(1, 0, 0, 0));
     
     // (3) Any live cell with more than three live neighbours dies, as if by overpopulation

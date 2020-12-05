@@ -38,13 +38,13 @@ int main()
         cl::Kernel kernel(program, "conway");
 
         /// Init N parameter of the game: the game is played on an N * N big square grid
-        size_t N = 50;
+        size_t N = 64;
 
         ///Init T parameter of the game: how many iterations we do
         unsigned int T = 30;
 
         /// Fill grid with random cell states or with pre-defined one
-        bool random_starting_state = true;
+        bool random_starting_state = false;
 
         /// Vector holding the state of the game
         std::vector<int> state_of_game(N * N);
@@ -56,18 +56,57 @@ int main()
             std::mt19937 rng(rd());                       // Random-number engine used (Mersenne-Twister)
             std::uniform_int_distribution<int> uni(0, 1); // Uniformly and randomly 0s and 1s 
 
-            for(int i=0;i<N;++i)
-                for(int j=0;j<N;++j)
-                    state_of_game[i * N + j] = uni(rng);
+            for(int i = 0; i < (N * N); ++i)
+                    state_of_game[i] = uni(rng);
         }
 
-        /* TODO: IMPLEMENT GLIDER
         else
         {
-        
-        }
-        */
+            for(int i = 0; i < N*N; ++ i)
+            {
+                // Glider gun
+                if(i == (N + 25)) state_of_game[i] = 1;
+                else if(i == (2*N + 23)) state_of_game[i] = 1;
+                else if(i == (2*N + 25)) state_of_game[i] = 1;
+                else if(i == (3*N + 13)) state_of_game[i] = 1;
+                else if(i == (3*N + 14)) state_of_game[i] = 1;
+                else if(i == (3*N + 21)) state_of_game[i] = 1;
+                else if(i == (3*N + 22)) state_of_game[i] = 1;
+                else if(i == (3*N + 35)) state_of_game[i] = 1;
+                else if(i == (3*N + 36)) state_of_game[i] = 1;
+                else if(i == (4*N + 12)) state_of_game[i] = 1;
+                else if(i == (4*N + 16)) state_of_game[i] = 1;
+                else if(i == (4*N + 21)) state_of_game[i] = 1;
+                else if(i == (4*N + 22)) state_of_game[i] = 1;
+                else if(i == (4*N + 35)) state_of_game[i] = 1;
+                else if(i == (4*N + 36)) state_of_game[i] = 1;
+                else if(i == (5*N + 1)) state_of_game[i] = 1;
+                else if(i == (5*N + 2)) state_of_game[i] = 1;
+                else if(i == (5*N + 11)) state_of_game[i] = 1;
+                else if(i == (5*N + 17)) state_of_game[i] = 1;
+                else if(i == (5*N + 21)) state_of_game[i] = 1;
+                else if(i == (5*N + 22)) state_of_game[i] = 1;
+                else if(i == (6*N + 1)) state_of_game[i] = 1;
+                else if(i == (6*N + 2)) state_of_game[i] = 1;
+                else if(i == (6*N + 11)) state_of_game[i] = 1;
+                else if(i == (6*N + 15)) state_of_game[i] = 1;
+                else if(i == (6*N + 17)) state_of_game[i] = 1;
+                else if(i == (6*N + 18)) state_of_game[i] = 1;
+                else if(i == (6*N + 23)) state_of_game[i] = 1;
+                else if(i == (6*N + 25)) state_of_game[i] = 1;
+                else if(i == (7*N + 11)) state_of_game[i] = 1;
+                else if(i == (7*N + 17)) state_of_game[i] = 1;
+                else if(i == (7*N + 25)) state_of_game[i] = 1;
+                else if(i == (8*N + 12)) state_of_game[i] = 1;
+                else if(i == (8*N + 16)) state_of_game[i] = 1;
+                else if(i == (9*N + 13)) state_of_game[i] = 1;
+                else if(i == (9*N + 14)) state_of_game[i] = 1;
 
+                // Others are dead
+                else state_of_game[i] = 0;
+            }
+        }
+        
         /// Parameters of the textures to be created
         size_t width = N;
         size_t height = N;
@@ -85,11 +124,11 @@ int main()
         /// Create cl::Sampler
         cl::Sampler sampler = cl::Sampler(context, CL_FALSE, CL_ADDRESS_REPEAT, CL_FILTER_NEAREST);
 
-        /// offset and size arrays for enqueueReadImage()
+        /// Offset and size arrays for enqueueReadImage()
         const std::array<cl::size_type, 3> origin = {0,0,0};
         const std::array<cl::size_type, 3> region = {N, N, 1};
 
-        /// file base name for dumping out the state of the game
+        /// File base name for dumping out the state of the game
         char file_base_name[] = "../csv_outputs/grid"; 
 
         /// Play the game T times
@@ -112,13 +151,14 @@ int main()
 
             /// Launch kernel
             queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(N,N), cl::NullRange);
+            cl::finish();
 
             /// Read the state of the game
             if (t % 2 == 0)
-                queue.enqueueReadImage(vec_of_textures[1], false, origin, region, 0, 0, state_of_game.data(), 0, nullptr);
+                queue.enqueueReadImage(vec_of_textures[1], true, origin, region, 0, 0, state_of_game.data(), 0, nullptr);
             else
-                queue.enqueueReadImage(vec_of_textures[0], false, origin, region, 0, 0, state_of_game.data(), 0, nullptr);
-            cl::finish();
+                queue.enqueueReadImage(vec_of_textures[0], true, origin, region, 0, 0, state_of_game.data(), 0, nullptr);
+            
         }
 
 
