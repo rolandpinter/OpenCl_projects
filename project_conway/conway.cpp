@@ -102,9 +102,6 @@ int main()
                 else if(i == (9*N + 13)) state_of_game[i] = 1;
                 else if(i == (9*N + 14)) state_of_game[i] = 1;
                 
-
-               
-
                 // Others are dead
                 else state_of_game[i] = 0;
             }
@@ -161,11 +158,7 @@ int main()
                 queue.enqueueReadImage(vec_of_textures[1], true, origin, region, 0, 0, state_of_game.data(), 0, nullptr);
             else
                 queue.enqueueReadImage(vec_of_textures[0], true, origin, region, 0, 0, state_of_game.data(), 0, nullptr);
-               
-            
         }
-
-
 
     }/// end of try case
     
